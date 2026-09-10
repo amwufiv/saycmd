@@ -12,10 +12,11 @@ fi
 _saycmd_accept_line() {
   local prefix=__SAYCMD_PREFIX__
   prefix="${SAYCMD_PREFIX:-$prefix}"
+  local followup_prefix="${prefix}${prefix}"
   local followup=0
-  if [[ "$BUFFER" == '??'* ]]; then
+  if [[ -n "$prefix" && "$BUFFER" == "$followup_prefix"* ]]; then
     followup=1
-    prefix='??'
+    prefix="$followup_prefix"
   elif [[ -z "$prefix" || "$BUFFER" != "$prefix"* ]]; then
     zle saycmd-original-accept-line
     return

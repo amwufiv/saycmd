@@ -133,7 +133,7 @@ BUFFER='?列出当前目录文件'
 _saycmd_accept_line
 result=$?
 [[ ${{#progress}} -ge 2 && "${{progress[1]}}" != "${{progress[2]}}" ]] || exit 90
-[[ "${{progress[1]}}" == 'saycmd: '*generating* ]] || exit 91
+[[ "${{progress[1]}}" == *' generating… '*s ]] || exit 91
 print -r -- "$result"
 print -r -- "$BUFFER"
 print -r -- "$CURSOR"
@@ -193,12 +193,19 @@ print -r -- "$last_message"
 #[test]
 fn followups_preserve_context_on_failure_and_reset_on_new_generation() {
     use std::os::unix::fs::PermissionsExt;
-    let temp = tempfile::tempdir().unwrap();
-    let mock = temp.path().join("saycmd");
-    let log = temp.path().join("calls.jsonl");
-    std::fs::write(
-        &mock,
-        r#"#!/usr/bin/python3
+    for (configured, runtime) in [
+        ("?", None),
+        ("？", None),
+        ("??", None),
+        ("ask:", None),
+        ("?", Some("[*]")),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let mock = temp.path().join("saycmd");
+        let log = temp.path().join("calls.jsonl");
+        std::fs::write(
+            &mock,
+            r#"#!/usr/bin/python3
 import json, os, sys
 with open(os.environ['CALL_LOG'], 'a') as f:
     f.write(json.dumps(sys.argv[1:]) + '\n')
@@ -207,78 +214,80 @@ if os.environ.get('MOCK_FAIL') == '1':
     sys.exit(7)
 sys.stdout.write(os.environ['MOCK_COMMAND'] + '\0')
 "#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&mock, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = std::env::join_paths(
-        std::iter::once(temp.path().to_path_buf())
-            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
-    )
-    .unwrap();
-    let script = format!(
-        r#"
+        )
+        .unwrap();
+        std::fs::set_permissions(&mock, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::join_paths(
+            std::iter::once(temp.path().to_path_buf())
+                .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+        )
+        .unwrap();
+        let script = format!(
+            r#"
 set -e
 zle() {{ :; }}
 {}
-BUFFER='??sort by time'
+BUFFER="${{TEST_PREFIX}}${{TEST_PREFIX}}sort by time"
 if _saycmd_accept_line; then exit 11; fi
-[[ "$BUFFER" == '??sort by time' ]]
+[[ "$BUFFER" == "${{TEST_PREFIX}}${{TEST_PREFIX}}sort by time" ]]
 export MOCK_COMMAND='ls'
-BUFFER='?list files'
+BUFFER="${{TEST_PREFIX}}list files"
 _saycmd_accept_line
 [[ "$BUFFER" == ls ]]
 # Ordinary execution does not erase the follow-up context.
 _saycmd_accept_line
 export MOCK_COMMAND='ls -t'
-BUFFER='??sort by time'
+BUFFER="${{TEST_PREFIX}}${{TEST_PREFIX}}sort by time"
 _saycmd_accept_line
 [[ "$BUFFER" == 'ls -t' ]]
 export MOCK_FAIL=1
-BUFFER='??include hidden'
+BUFFER="${{TEST_PREFIX}}${{TEST_PREFIX}}include hidden"
 if _saycmd_accept_line; then exit 12; fi
-[[ "$BUFFER" == '??include hidden' && "$_saycmd_last_command" == 'ls -t' ]]
+[[ "$BUFFER" == "${{TEST_PREFIX}}${{TEST_PREFIX}}include hidden" && "$_saycmd_last_command" == 'ls -t' ]]
 export MOCK_FAIL=0 MOCK_COMMAND='ls -ta'
 _saycmd_accept_line
 [[ "$BUFFER" == 'ls -ta' ]]
 export MOCK_COMMAND='pwd'
-BUFFER='?show directory'
+BUFFER="${{TEST_PREFIX}}show directory"
 _saycmd_accept_line
-BUFFER='??physical path'
+BUFFER="${{TEST_PREFIX}}${{TEST_PREFIX}}physical path"
 _saycmd_accept_line
 # Reloading integration keeps this session's context.
 {}
 [[ "$_saycmd_last_command" == pwd && "${{#_saycmd_requests}}" == 2 ]]
-for n in {{1..10}}; do BUFFER="??revision $n"; _saycmd_accept_line; done
+for n in {{1..10}}; do BUFFER="${{TEST_PREFIX}}${{TEST_PREFIX}}revision $n"; _saycmd_accept_line; done
 [[ "${{#_saycmd_requests}}" == 8 && "${{_saycmd_requests[1]}}" == 'show directory' && "${{_saycmd_requests[2]}}" == 'revision 4' ]]
 "#,
-        saycmd::shell::zsh_init("?"),
-        saycmd::shell::zsh_init("?")
-    );
-    let output = Command::new("zsh")
-        .args(["-f", "-c", &script])
-        .env("PATH", path)
-        .env("CALL_LOG", &log)
-        .env_remove("SAYCMD_PREFIX")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let calls: Vec<Vec<String>> = std::fs::read_to_string(log)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert!(!calls[0].iter().any(|arg| arg.starts_with("--previous-")));
-    assert!(calls[1].contains(&"--previous-command=ls".into()));
-    assert!(calls[1].contains(&"--previous-request=list files".into()));
-    assert_eq!(calls[1].last().unwrap(), "sort by time");
-    assert_eq!(calls[2], calls[3]); // Failed attempts are not added to history.
-    assert!(calls[3].contains(&"--previous-command=ls -t".into()));
-    assert!(calls[3].contains(&"--previous-request=sort by time".into()));
-    assert!(!calls[4].iter().any(|arg| arg.starts_with("--previous-")));
-    assert!(calls[5].contains(&"--previous-request=show directory".into()));
-    assert!(!calls[5].contains(&"--previous-request=list files".into()));
+            saycmd::shell::zsh_init(configured),
+            saycmd::shell::zsh_init(configured)
+        );
+        let output = Command::new("zsh")
+            .args(["-f", "-c", &script])
+            .env("TEST_PREFIX", runtime.unwrap_or(configured))
+            .env("PATH", path)
+            .env("CALL_LOG", &log)
+            .env("SAYCMD_PREFIX", runtime.unwrap_or(""))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let calls: Vec<Vec<String>> = std::fs::read_to_string(log)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(!calls[0].iter().any(|arg| arg.starts_with("--previous-")));
+        assert!(calls[1].contains(&"--previous-command=ls".into()));
+        assert!(calls[1].contains(&"--previous-request=list files".into()));
+        assert_eq!(calls[1].last().unwrap(), "sort by time");
+        assert_eq!(calls[2], calls[3]); // Failed attempts are not added to history.
+        assert!(calls[3].contains(&"--previous-command=ls -t".into()));
+        assert!(calls[3].contains(&"--previous-request=sort by time".into()));
+        assert!(!calls[4].iter().any(|arg| arg.starts_with("--previous-")));
+        assert!(calls[5].contains(&"--previous-request=show directory".into()));
+        assert!(!calls[5].contains(&"--previous-request=list files".into()));
+    }
 }

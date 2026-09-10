@@ -72,22 +72,25 @@ While generating, a spinner and elapsed seconds appear below the input line.
 
 ## Follow-up revisions
 
-Use `??` to revise the most recently generated command in the current terminal:
+Repeat the configured `prefix` twice to revise the most recently generated command
+in the current terminal. With the default `prefix = "？"`, use `？？`:
 
 ```text
-?list files
+？list files
 → ls
-??sort by modification time
+？？sort by modification time
 → ls -t
-??include hidden files too
+？？include hidden files too
 → ls -ta
 ```
 
-Replace the command in the editor with `??` followed by your revision, then press
+Replace the command in the editor with the doubled prefix followed by your revision, then press
 Enter. You can also follow up after executing the command. No shortcut is required.
 Each result remains editable and requires another Enter to execute.
 
-`??` is reserved for follow-ups, regardless of the configured initial prefix.
+The follow-up marker always repeats the current prefix twice, including a
+`SAYCMD_PREFIX` override: `?` becomes `??`, `？` becomes `？？`, and `ask:` becomes
+`ask:ask:`. The doubled prefix is checked before the single prefix.
 The previous command, original request and up to seven latest revisions are kept
 only in the current shell's memory and sent with follow-up requests. This does not
 read shell history or track manual edits to commands. A successful new request using
